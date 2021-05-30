@@ -8,12 +8,18 @@
 using namespace std;
 
 int main(int argc, char** argv) {
+  const int kc = 512;
+  const int nc = 64;
+  const int mc = 256;
+  const int nr = 64;
+  const int mr = 32;
+
   int size, rank;
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  const int N = 256;
+  const int N = 512;
   vector<float> A(N * N);
   vector<float> B(N * N);
   vector<float> C(N * N, 0);
@@ -51,6 +57,51 @@ int main(int argc, char** argv) {
     // multiply on sub array
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
+
+    /*
+    #pragma omp parallel for collapse(2)
+        for (int jc = 0; jc < N; jc += nc) {
+          for (int pc = 0; pc < N; pc += kc) {
+            float Bc[kc * nc];
+            for (int p = 0; p < kc; ++p) {
+              for (int j = 0; j < nc; ++j) {
+                Bc[p * nc + j] = subB[N / size * (p + pc) + (j + pc)];
+              }
+            }
+
+            for (int ic = 0; ic < N; ic += mc) {
+              float Ac[mc * kc], Cc[mc * nc];
+              for (int i = 0; i < mc; ++i) {
+                for (int p = 0; p < kc; ++p) {
+                  Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
+                }
+                for (int j = 0; j < nc; ++j) {
+                  Cc[i * nc + j] = 0;
+                }
+              }
+
+              for (int jr = 0; jr < nc; jr += nr) {
+                for (int ir = 0; ir < mc; ir += mr) {
+                  for (int kr = 0; kr < kc; ++kr) {
+                    for (int i = kr; i < ir + mr; ++i) {
+                      for (int j = jr; j < jr + nr; ++j) {
+                        Cc[i * nc + j] += Ac[i * kc + kr] * Bc[kr * nc + j];
+                      }
+                    }
+                  }
+                }
+              }
+
+              for (int i = 0; i < mc; ++i) {
+                for (int j = 0; j < nc; ++j) {
+                  subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
+                }
+              }
+            }
+          }
+        }
+        */
+
 #pragma omp parallel for collapse(2)
     for (int i = 0; i < N / size; i++) {
       for (int k = 0; k < N; k++) {
@@ -80,10 +131,11 @@ int main(int argc, char** argv) {
   MPI_Allgather(&subC[0], N * N / size, MPI_FLOAT, &C[0], N * N / size,
                 MPI_FLOAT, MPI_COMM_WORLD);
 
-  // evaluate error
+// evaluate error
+#pragma omp parallel for collapse(2)
   for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < N; k++) {
+    for (int k = 0; k < N; k++) {
+      for (int j = 0; j < N; j++) {
         C[N * i + j] -= A[N * i + k] * B[N * k + j];
       }
     }
