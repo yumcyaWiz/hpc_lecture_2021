@@ -63,10 +63,11 @@ int main(int argc, char** argv) {
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
 
-#pragma omp parallel for collapse(2)
+    float Ac[mc * kc], Cc[mc * nc];
+    float Bc[kc * nc];
+#pragma omp parallel for collapse(2) private(Ac, Bc, Cc)
     for (int jc = 0; jc < n; jc += nc) {
       for (int pc = 0; pc < k; pc += kc) {
-        float Bc[kc * nc];
         for (int p = 0; p < kc; p++) {
           for (int j = 0; j < nc; j++) {
             Bc[p * nc + j] = subB[N / size * (p + pc) + (j + jc)];
@@ -74,7 +75,6 @@ int main(int argc, char** argv) {
         }
 
         for (int ic = 0; ic < m; ic += mc) {
-          float Ac[mc * kc], Cc[mc * nc];
           for (int i = 0; i < mc; i++) {
             for (int p = 0; p < kc; p++) {
               Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
