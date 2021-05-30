@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  const int N = 512;
+  const int N = 1024;
   vector<float> A(N * N);
   vector<float> B(N * N);
   vector<float> C(N * N, 0);
@@ -27,6 +27,10 @@ int main(int argc, char** argv) {
   vector<float> subB(N * N / size);
   vector<float> subC(N * N / size, 0);
   vector<float> recv(N * N / size);
+
+  const int m = N / size;
+  const int n = N / size;
+  const int k = N / size;
 
   // prepare A, B
   for (int i = 0; i < N; i++) {
@@ -58,58 +62,59 @@ int main(int argc, char** argv) {
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
 
-    /*
-    #pragma omp parallel for collapse(2)
-        for (int jc = 0; jc < N; jc += nc) {
-          for (int pc = 0; pc < N; pc += kc) {
-            float Bc[kc * nc];
-            for (int p = 0; p < kc; ++p) {
-              for (int j = 0; j < nc; ++j) {
-                Bc[p * nc + j] = subB[N / size * (p + pc) + (j + pc)];
-              }
+#pragma omp parallel for collapse(2)
+    for (int jc = 0; jc < n; jc += nc) {
+      for (int pc = 0; pc < k; pc += kc) {
+        float Bc[kc * nc];
+        for (int p = 0; p < kc; p++) {
+          for (int j = 0; j < nc; j++) {
+            Bc[p * nc + j] = subB[N / size * (p + pc) + (j + jc)];
+          }
+        }
+
+        for (int ic = 0; ic < m; ic += mc) {
+          float Ac[mc * kc], Cc[mc * nc];
+          for (int i = 0; i < mc; i++) {
+            for (int p = 0; p < kc; p++) {
+              Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
             }
+            for (int j = 0; j < nc; j++) {
+              Cc[i * nc + j] = 0;
+            }
+          }
 
-            for (int ic = 0; ic < N; ic += mc) {
-              float Ac[mc * kc], Cc[mc * nc];
-              for (int i = 0; i < mc; ++i) {
-                for (int p = 0; p < kc; ++p) {
-                  Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
-                }
-                for (int j = 0; j < nc; ++j) {
-                  Cc[i * nc + j] = 0;
-                }
-              }
-
-              for (int jr = 0; jr < nc; jr += nr) {
-                for (int ir = 0; ir < mc; ir += mr) {
-                  for (int kr = 0; kr < kc; ++kr) {
-                    for (int i = kr; i < ir + mr; ++i) {
-                      for (int j = jr; j < jr + nr; ++j) {
-                        Cc[i * nc + j] += Ac[i * kc + kr] * Bc[kr * nc + j];
-                      }
-                    }
+          for (int jr = 0; jr < nc; jr += nr) {
+            for (int ir = 0; ir < mc; ir += mr) {
+              for (int kr = 0; kr < kc; kr++) {
+                for (int i = ir; i < ir + mr; i++) {
+                  for (int j = jr; j < jr + nr; j++) {
+                    Cc[i * nc + j] += Ac[i * kc + kr] * Bc[kr * nc + j];
                   }
-                }
-              }
-
-              for (int i = 0; i < mc; ++i) {
-                for (int j = 0; j < nc; ++j) {
-                  subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
                 }
               }
             }
           }
-        }
-        */
 
-#pragma omp parallel for collapse(2)
-    for (int i = 0; i < N / size; i++) {
-      for (int k = 0; k < N; k++) {
-        for (int j = 0; j < N / size; j++) {
-          subC[N * i + j + offset] += subA[N * i + k] * subB[N / size * k + j];
+          for (int i = 0; i < mc; i++) {
+            for (int j = 0; j < nc; j++) {
+              subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
+            }
+          }
         }
       }
     }
+
+    /*
+    #pragma omp parallel for collapse(2)
+        for (int i = 0; i < N / size; i++) {
+          for (int k = 0; k < N; k++) {
+            for (int j = 0; j < N / size; j++) {
+              subC[N * i + j + offset] += subA[N * i + k] * subB[N / size * k +
+    j];
+            }
+          }
+        }
+        */
     auto toc = chrono::steady_clock::now();
     comp_time += chrono::duration<double>(toc - tic).count();
 
