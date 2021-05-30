@@ -248,6 +248,7 @@ int main(int argc, char** argv) {
     MPI_Irecv(&recv[0], N * N / size, MPI_FLOAT, recv_from, 0, MPI_COMM_WORLD,
               &request[1]);
     MPI_Waitall(2, request, MPI_STATUS_IGNORE);
+#pragma omp parallel for
     for (int i = 0; i < N * N / size; i++) {
       subB[i] = recv[i];
     }
