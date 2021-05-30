@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <omp.h>
 
 #include <chrono>
 #include <cmath>
@@ -50,6 +51,7 @@ int main(int argc, char** argv) {
     // multiply on sub array
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < N / size; i++) {
       for (int k = 0; k < N; k++) {
         for (int j = 0; j < N / size; j++) {
