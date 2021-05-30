@@ -8,6 +8,17 @@
 #include <vector>
 using namespace std;
 
+void matmult(float* A, float* B, float* C, int N, int size, int offset) {
+#pragma omp parallel for collapse(2)
+  for (int i = 0; i < N / size; i++) {
+    for (int k = 0; k < N; k++) {
+      for (int j = 0; j < N / size; j++) {
+        C[N * i + j + offset] += A[N * i + k] * B[N / size * k + j];
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   const int kc = 512;
   const int nc = 64;
@@ -63,51 +74,53 @@ int main(int argc, char** argv) {
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
 
-    float Ac[mc * kc], Cc[mc * nc];
-    float Bc[kc * nc];
-#pragma omp parallel for collapse(2) private(Ac, Bc, Cc)
-    for (int jc = 0; jc < n; jc += nc) {
-      for (int pc = 0; pc < k; pc += kc) {
-        for (int p = 0; p < kc; p++) {
-          for (int j = 0; j < nc; j++) {
-            Bc[p * nc + j] = subB[N / size * (p + pc) + (j + jc)];
-          }
-        }
+    /*
+       float Ac[mc * kc], Cc[mc * nc];
+       float Bc[kc * nc];
+   #pragma omp parallel for collapse(2) private(Ac, Bc, Cc)
+       for (int jc = 0; jc < n; jc += nc) {
+         for (int pc = 0; pc < k; pc += kc) {
+           for (int p = 0; p < kc; p++) {
+             for (int j = 0; j < nc; j++) {
+               Bc[p * nc + j] = subB[N / size * (p + pc) + (j + jc)];
+             }
+           }
 
-        for (int ic = 0; ic < m; ic += mc) {
-          for (int i = 0; i < mc; i++) {
-            for (int p = 0; p < kc; p++) {
-              Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
-            }
-            for (int j = 0; j < nc; j++) {
-              Cc[i * nc + j] = 0;
-            }
-          }
+           for (int ic = 0; ic < m; ic += mc) {
+             for (int i = 0; i < mc; i++) {
+               for (int p = 0; p < kc; p++) {
+                 Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
+               }
+               for (int j = 0; j < nc; j++) {
+                 Cc[i * nc + j] = 0;
+               }
+             }
 
-          for (int jr = 0; jr < nc; jr += nr) {
-            for (int ir = 0; ir < mc; ir += mr) {
-              for (int kr = 0; kr < kc; kr++) {
-                for (int i = ir; i < ir + mr; i++) {
-                  __m256 Avec = _mm256_broadcast_ss(Ac + i * kc + kr);
-                  for (int j = jr; j < jr + nr; j += 8) {
-                    __m256 Bvec = _mm256_load_ps(Bc + kr * nc + j);
-                    __m256 Cvec = _mm256_load_ps(Cc + i * nc + j);
-                    Cvec = _mm256_fmadd_ps(Avec, Bvec, Cvec);
-                    _mm256_store_ps(Cc + i * nc + j, Cvec);
-                  }
-                }
-              }
-            }
-          }
+             for (int jr = 0; jr < nc; jr += nr) {
+               for (int ir = 0; ir < mc; ir += mr) {
+                 for (int kr = 0; kr < kc; kr++) {
+                   for (int i = ir; i < ir + mr; i++) {
+                     __m256 Avec = _mm256_broadcast_ss(Ac + i * kc + kr);
+                     for (int j = jr; j < jr + nr; j += 8) {
+                       __m256 Bvec = _mm256_load_ps(Bc + kr * nc + j);
+                       __m256 Cvec = _mm256_load_ps(Cc + i * nc + j);
+                       Cvec = _mm256_fmadd_ps(Avec, Bvec, Cvec);
+                       _mm256_store_ps(Cc + i * nc + j, Cvec);
+                     }
+                   }
+                 }
+               }
+             }
 
-          for (int i = 0; i < mc; i++) {
-            for (int j = 0; j < nc; j++) {
-              subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
-            }
-          }
-        }
-      }
-    }
+             for (int i = 0; i < mc; i++) {
+               for (int j = 0; j < nc; j++) {
+                 subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
+               }
+             }
+           }
+         }
+       }
+       */
 
     /*
     #pragma omp parallel for collapse(2)
@@ -153,17 +166,7 @@ int main(int argc, char** argv) {
         }
         */
 
-    /*
-    #pragma omp parallel for collapse(2)
-        for (int i = 0; i < N / size; i++) {
-          for (int k = 0; k < N; k++) {
-            for (int j = 0; j < N / size; j++) {
-              subC[N * i + j + offset] += subA[N * i + k] * subB[N / size * k +
-    j];
-            }
-          }
-        }
-        */
+    matmult(subA.data(), subB.data(), subC.data(), N, size, offset);
     auto toc = chrono::steady_clock::now();
     comp_time += chrono::duration<double>(toc - tic).count();
 
