@@ -1,3 +1,4 @@
+#include <immintrin.h>
 #include <mpi.h>
 #include <omp.h>
 
@@ -87,8 +88,12 @@ int main(int argc, char** argv) {
             for (int ir = 0; ir < mc; ir += mr) {
               for (int kr = 0; kr < kc; kr++) {
                 for (int i = ir; i < ir + mr; i++) {
-                  for (int j = jr; j < jr + nr; j++) {
-                    Cc[i * nc + j] += Ac[i * kc + kr] * Bc[kr * nc + j];
+                  __m256 Avec = _mm256_broadcast_ss(Ac + i * kc + kr);
+                  for (int j = jr; j < jr + nr; j += 8) {
+                    __m256 Bvec = _mm256_load_ps(Bc + kr * nc + j);
+                    __m256 Cvec = _mm256_load_ps(Cc + i * nc + j);
+                    Cvec = _mm256_fmadd_ps(Avec, Bvec, Cvec);
+                    _mm256_store_ps(Cc + i * nc + j, Cvec);
                   }
                 }
               }
@@ -103,6 +108,50 @@ int main(int argc, char** argv) {
         }
       }
     }
+
+    /*
+    #pragma omp parallel for collapse(2)
+        for (int jc = 0; jc < n; jc += nc) {
+          for (int pc = 0; pc < k; pc += kc) {
+            float Bc[kc * nc];
+            for (int p = 0; p < kc; p++) {
+              for (int j = 0; j < nc; j++) {
+                Bc[p * nc + j] = subB[N / size * (p + pc) + (j + jc)];
+              }
+            }
+
+            for (int ic = 0; ic < m; ic += mc) {
+              float Ac[mc * kc], Cc[mc * nc];
+              for (int i = 0; i < mc; i++) {
+                for (int p = 0; p < kc; p++) {
+                  Ac[i * kc + p] = subA[N * (i + ic) + (p + pc)];
+                }
+                for (int j = 0; j < nc; j++) {
+                  Cc[i * nc + j] = 0;
+                }
+              }
+
+              for (int jr = 0; jr < nc; jr += nr) {
+                for (int ir = 0; ir < mc; ir += mr) {
+                  for (int kr = 0; kr < kc; kr++) {
+                    for (int i = ir; i < ir + mr; i++) {
+                      for (int j = jr; j < jr + nr; j++) {
+                        Cc[i * nc + j] += Ac[i * kc + kr] * Bc[kr * nc + j];
+                      }
+                    }
+                  }
+                }
+              }
+
+              for (int i = 0; i < mc; i++) {
+                for (int j = 0; j < nc; j++) {
+                  subC[N * (i + ic) + (j + jc) + offset] += Cc[i * nc + j];
+                }
+              }
+            }
+          }
+        }
+        */
 
     /*
     #pragma omp parallel for collapse(2)
