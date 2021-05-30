@@ -51,8 +51,8 @@ int main(int argc, char** argv) {
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
     for (int i = 0; i < N / size; i++) {
-      for (int j = 0; j < N / size; j++) {
-        for (int k = 0; k < N; k++) {
+      for (int k = 0; k < N; k++) {
+        for (int j = 0; j < N / size; j++) {
           subC[N * i + j + offset] += subA[N * i + k] * subB[N / size * k + j];
         }
       }
