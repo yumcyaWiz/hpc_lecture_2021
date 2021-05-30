@@ -45,7 +45,9 @@ int main(int argc, char** argv) {
   int send_to = (rank - 1 + size) % size;
 
   double comp_time = 0, comm_time = 0;
+  // iterate by ringged subB
   for (int irank = 0; irank < size; irank++) {
+    // multiply on sub array
     auto tic = chrono::steady_clock::now();
     offset = N / size * ((rank + irank) % size);
     for (int i = 0; i < N / size; i++) {
@@ -57,16 +59,22 @@ int main(int argc, char** argv) {
     }
     auto toc = chrono::steady_clock::now();
     comp_time += chrono::duration<double>(toc - tic).count();
+
+    // ring subB
     MPI_Request request[2];
     MPI_Isend(&subB[0], N * N / size, MPI_FLOAT, send_to, 0, MPI_COMM_WORLD,
               &request[0]);
     MPI_Irecv(&recv[0], N * N / size, MPI_FLOAT, recv_from, 0, MPI_COMM_WORLD,
               &request[1]);
     MPI_Waitall(2, request, MPI_STATUS_IGNORE);
-    for (int i = 0; i < N * N / size; i++) subB[i] = recv[i];
+    for (int i = 0; i < N * N / size; i++) {
+      subB[i] = recv[i];
+    }
     tic = chrono::steady_clock::now();
     comm_time += chrono::duration<double>(tic - toc).count();
   }
+
+  // gather sub result
   MPI_Allgather(&subC[0], N * N / size, MPI_FLOAT, &C[0], N * N / size,
                 MPI_FLOAT, MPI_COMM_WORLD);
 
