@@ -50,7 +50,6 @@ int main(int argc, char** argv) {
   float* subA;
   float* subB;
   float* subC;
-  float* recv;
   cudaMallocManaged(&subA, M * N * sizeof(float));
   cudaMallocManaged(&subB, N * M * sizeof(float));
   cudaMallocManaged(&subC, M * N * sizeof(float));
@@ -126,5 +125,10 @@ int main(int argc, char** argv) {
     printf("total: %lf s (%lf GFlops)\n", time, 2. * N * N * N / time / 1e9);
     printf("error: %lf\n", err / N / N);
   }
+
+  cudaFree(subA);
+  cudaFree(subB);
+  cudaFree(subC);
+
   MPI_Finalize();
 }
