@@ -7,7 +7,7 @@
 #include <vector>
 using namespace std;
 
-__global__ void matmul(float* A, float* B, float* C, int N, int offset) {
+__global__ void matmul(float* A, float* B, float* C, int N) {
   int i = blockIdx.y;
   int j = threadIdx.x + blockDim.x * blockIdx.x;
   float sum = 0.0f;
@@ -20,7 +20,7 @@ __global__ void matmul(float* A, float* B, float* C, int N, int offset) {
       sum += A_s[k - ks] * B[N * k + j];
     }
   }
-  C[N * i + j + offset] = sum;
+  C[N * i + j] = sum;
 }
 
 int main(int argc, char** argv) {
@@ -34,9 +34,9 @@ int main(int argc, char** argv) {
   cudaSetDevice(rank % gpusize);
   cudaGetDevice(&gpurank);
 
-  int N = 1024;
+  int N = 4096;
   int M = N / size;
-  int blockSize = 128;
+  int blockSize = 1024;
   vector<float> A(N * N);
   float* B;
   cudaMallocManaged(&B, N * N * sizeof(float));
@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
   float* subC;
   cudaMallocManaged(&subA, M * N * sizeof(float));
   cudaMallocManaged(&subC, M * N * sizeof(float));
+#pragma omp parallel for
   for (int i = 0; i < M * N; i++) {
     subC[i] = 0;
   }
@@ -69,8 +70,8 @@ int main(int argc, char** argv) {
   offset = M * N * rank;
 
   dim3 grid(N / blockSize, M);
-  matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, B, subC, N,
-                                                         offset);
+  matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, B, subC, N);
+
   cudaDeviceSynchronize();
   auto toc = chrono::steady_clock::now();
   comp_time += chrono::duration<double>(toc - tic).count();
@@ -83,8 +84,8 @@ int main(int argc, char** argv) {
 
 #pragma omp parallel for collapse(2)
   for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < N; k++) {
+    for (int k = 0; k < N; k++) {
+      for (int j = 0; j < N; j++) {
         C[N * i + j] -= A[N * i + k] * B[N * k + j];
       }
     }
