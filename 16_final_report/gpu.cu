@@ -7,7 +7,7 @@
 #include <vector>
 using namespace std;
 
-__global__ void matmul(float* A, float* B, float* C, int N, int offset) {
+__global__ void matmul(float* A, float* B, float* C, int M, int N, int offset) {
   int i = blockIdx.y;
   int j = threadIdx.x + blockDim.x * blockIdx.x;
   float sum = 0.0f;
@@ -17,10 +17,10 @@ __global__ void matmul(float* A, float* B, float* C, int N, int offset) {
     A_s[threadIdx.x] = A[N * i + ks + threadIdx.x];
     __syncthreads();
     for (int k = ks; k < ks + blockDim.x; k++) {
-      sum += A_s[k - ks] * B[N * k + j];
+      sum += A_s[k - ks] * B[M * k + j];
     }
   }
-  C[N * i + j + offset] = sum;
+  C[M * i + j + offset] = sum;
 }
 
 int main(int argc, char** argv) {
@@ -35,7 +35,8 @@ int main(int argc, char** argv) {
   cudaGetDevice(&gpurank);
 
   int N = 4096;
-  int M = 1024;
+  int M = N / size;
+  int blockSize = 1024;
   vector<float> A(N * N);
   vector<float> B(N * N);
   vector<float> C(N * N, 0);
@@ -50,22 +51,24 @@ int main(int argc, char** argv) {
   float* subB;
   float* subC;
   float* recv;
-  cudaMallocManaged(&subA, N * N / size);
-  cudaMallocManaged(&subB, N * N / size);
-  cudaMallocManaged(&subC, N * N / size);
-  for (int i = 0; i < N * N / size; i++) {
+  cudaMallocManaged(&subA, M * N * sizeof(float));
+  cudaMallocManaged(&subB, N * M * sizeof(float));
+  cudaMallocManaged(&subC, M * N * sizeof(float));
+  for (int i = 0; i < M * N; i++) {
     subC[i] = 0;
   }
 
   int offset = N / size * rank;
+#pragma omp parallel for
   for (int i = 0; i < N / size; i++) {
     for (int j = 0; j < N; j++) {
       subA[N * i + j] = A[N * (i + offset) + j];
     }
   }
+#pragma omp parallel for
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N / size; j++) {
-      subB[N / size * i + j] = B[N * i + j + offset];
+      subB[M * i + j] = B[N * i + j + offset];
     }
   }
 
@@ -75,13 +78,15 @@ int main(int argc, char** argv) {
   double comp_time = 0, comm_time = 0;
   for (int irank = 0; irank < size; irank++) {
     auto tic = chrono::steady_clock::now();
-    offset = N / size * ((rank + irank) % size);
+    offset = M * ((rank + irank) % size);
 
-    dim3 grid(N / M, N);
-    matmul<<<grid, M, M * sizeof(float)>>>(subA, subB, subC, N, offset);
-
+    dim3 grid(M / blockSize, M);
+    matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, subB, subC, M,
+                                                           N, offset);
+    cudaDeviceSynchronize();
     auto toc = chrono::steady_clock::now();
     comp_time += chrono::duration<double>(toc - tic).count();
+
     MPI_Request request[2];
     MPI_Isend(&subB[0], N * N / size, MPI_FLOAT, send_to, 0, MPI_COMM_WORLD,
               &request[0]);
