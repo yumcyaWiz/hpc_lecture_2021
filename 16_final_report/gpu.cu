@@ -7,7 +7,7 @@
 #include <vector>
 using namespace std;
 
-__global__ void matmul(float* A, float* B, float* C, int M, int N, int offset) {
+__global__ void matmul(float* A, float* B, float* C, int N) {
   int i = blockIdx.y;
   int j = threadIdx.x + blockDim.x * blockIdx.x;
   float sum = 0.0f;
@@ -17,10 +17,10 @@ __global__ void matmul(float* A, float* B, float* C, int M, int N, int offset) {
     A_s[threadIdx.x] = A[N * i + ks + threadIdx.x];
     __syncthreads();
     for (int k = ks; k < ks + blockDim.x; k++) {
-      sum += A_s[k - ks] * B[M * k + j];
+      sum += A_s[k - ks] * B[N * k + j];
     }
   }
-  C[M * i + j + offset] = sum;
+  C[N * i + j] = sum;
 }
 
 int main(int argc, char** argv) {
@@ -38,7 +38,8 @@ int main(int argc, char** argv) {
   int M = N / size;
   int blockSize = 1024;
   vector<float> A(N * N);
-  vector<float> B(N * N);
+  float* B;
+  cudaMallocManaged(&B, N * N * sizeof(float));
   vector<float> C(N * N, 0);
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
@@ -48,65 +49,43 @@ int main(int argc, char** argv) {
   }
 
   float* subA;
-  float* subB;
   float* subC;
   cudaMallocManaged(&subA, M * N * sizeof(float));
-  cudaMallocManaged(&subB, N * M * sizeof(float));
   cudaMallocManaged(&subC, M * N * sizeof(float));
-  vector<float> recv(N * M);
+#pragma omp parallel for
   for (int i = 0; i < M * N; i++) {
     subC[i] = 0;
   }
 
-  int offset = N / size * rank;
+  int offset = M * rank;
 #pragma omp parallel for
   for (int i = 0; i < N / size; i++) {
     for (int j = 0; j < N; j++) {
       subA[N * i + j] = A[N * (i + offset) + j];
     }
   }
-#pragma omp parallel for
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N / size; j++) {
-      subB[M * i + j] = B[N * i + j + offset];
-    }
-  }
-
-  int recv_from = (rank + 1) % size;
-  int send_to = (rank - 1 + size) % size;
 
   double comp_time = 0, comm_time = 0;
-  for (int irank = 0; irank < size; irank++) {
-    auto tic = chrono::steady_clock::now();
-    offset = M * ((rank + irank) % size);
+  auto tic = chrono::steady_clock::now();
+  offset = M * N * rank;
 
-    dim3 grid(M / blockSize, M);
-    matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, subB, subC, M,
-                                                           N, offset);
-    cudaDeviceSynchronize();
-    auto toc = chrono::steady_clock::now();
-    comp_time += chrono::duration<double>(toc - tic).count();
+  dim3 grid(N / blockSize, M);
+  matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, B, subC, N);
 
-    MPI_Request request[2];
-    MPI_Isend(&subB[0], N * N / size, MPI_FLOAT, send_to, 0, MPI_COMM_WORLD,
-              &request[0]);
-    MPI_Irecv(&recv[0], N * N / size, MPI_FLOAT, recv_from, 0, MPI_COMM_WORLD,
-              &request[1]);
-    MPI_Waitall(2, request, MPI_STATUS_IGNORE);
-#pragma omp parallel for
-    for (int i = 0; i < N * N / size; i++) {
-      subB[i] = recv[i];
-    }
-    tic = chrono::steady_clock::now();
-    comm_time += chrono::duration<double>(tic - toc).count();
-  }
-  MPI_Allgather(&subC[0], N * N / size, MPI_FLOAT, &C[0], N * N / size,
-                MPI_FLOAT, MPI_COMM_WORLD);
+  cudaDeviceSynchronize();
+  auto toc = chrono::steady_clock::now();
+  comp_time += chrono::duration<double>(toc - tic).count();
+
+  tic = chrono::steady_clock::now();
+  comm_time += chrono::duration<double>(tic - toc).count();
+
+  MPI_Allgather(&subC[0], M * N, MPI_FLOAT, &C[0], M * N, MPI_FLOAT,
+                MPI_COMM_WORLD);
 
 #pragma omp parallel for collapse(2)
   for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < N; k++) {
+    for (int k = 0; k < N; k++) {
+      for (int j = 0; j < N; j++) {
         C[N * i + j] -= A[N * i + k] * B[N * k + j];
       }
     }
@@ -127,7 +106,7 @@ int main(int argc, char** argv) {
   }
 
   cudaFree(subA);
-  cudaFree(subB);
+  cudaFree(B);
   cudaFree(subC);
 
   MPI_Finalize();
