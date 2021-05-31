@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
   cudaMallocManaged(&subA, M * N * sizeof(float));
   cudaMallocManaged(&subB, N * M * sizeof(float));
   cudaMallocManaged(&subC, M * N * sizeof(float));
+  vector<float> recv(N * M);
   for (int i = 0; i < M * N; i++) {
     subC[i] = 0;
   }
