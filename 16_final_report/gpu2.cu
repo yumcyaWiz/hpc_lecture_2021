@@ -38,7 +38,8 @@ int main(int argc, char** argv) {
   int M = N / size;
   int blockSize = 128;
   vector<float> A(N * N);
-  vector<float> B(N * N);
+  float* B;
+  cudaMallocManaged(&B, N * N * sizeof(float));
   vector<float> C(N * N, 0);
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
@@ -48,10 +49,8 @@ int main(int argc, char** argv) {
   }
 
   float* subA;
-  float* subB;
   float* subC;
   cudaMallocManaged(&subA, M * N * sizeof(float));
-  cudaMallocManaged(&subB, N * N * sizeof(float));
   cudaMallocManaged(&subC, M * N * sizeof(float));
   for (int i = 0; i < M * N; i++) {
     subC[i] = 0;
@@ -64,19 +63,13 @@ int main(int argc, char** argv) {
       subA[N * i + j] = A[N * (i + offset) + j];
     }
   }
-#pragma omp parallel for
-  for (int i = 0; i < N; i++) {
-    for (int j = 0; j < N; j++) {
-      subB[N * i + j] = B[N * i + j];
-    }
-  }
 
   double comp_time = 0, comm_time = 0;
   auto tic = chrono::steady_clock::now();
   offset = M * N * rank;
 
   dim3 grid(N / blockSize, M);
-  matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, subB, subC, N,
+  matmul<<<grid, blockSize, blockSize * sizeof(float)>>>(subA, B, subC, N,
                                                          offset);
   cudaDeviceSynchronize();
   auto toc = chrono::steady_clock::now();
@@ -112,7 +105,7 @@ int main(int argc, char** argv) {
   }
 
   cudaFree(subA);
-  cudaFree(subB);
+  cudaFree(B);
   cudaFree(subC);
 
   MPI_Finalize();
